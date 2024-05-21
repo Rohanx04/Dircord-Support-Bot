@@ -82,6 +82,7 @@ client.on('messageCreate', async message => {
             // Send the message back to the original user who initiated the conversation as an embed
             const embed = new EmbedBuilder()
                 .setColor(0x00ff00) // Green color
+                .setTitle('Support Team')
                 .setDescription(collectedMessage.content)
                 .setTimestamp()
                 .setFooter({ text: `From ${collectedMessage.author.tag}` });
@@ -93,24 +94,36 @@ client.on('messageCreate', async message => {
     }
 });
 
-// Listen for thread updates to detect when a thread is archived
+// Listen for thread updates to detect when a thread is archived or unarchived
 client.on('threadUpdate', async (oldThread, newThread) => {
-    if (!oldThread.archived && newThread.archived) {
-        // The thread was just archived
-        const userId = [...userThreads.entries()].find(([, thread]) => thread.id === newThread.id)?.[0];
-        if (userId) {
-            try {
-                const user = await client.users.fetch(userId);
-                const embed = new EmbedBuilder()
-                    .setColor(0xff0000) // Red color
-                    .setDescription('The support team has closed this thread.')
-                    .setTimestamp();
+    const userId = [...userThreads.entries()].find(([, thread]) => thread.id === newThread.id)?.[0];
 
-                await user.send({ embeds: [embed] });
-            } catch (error) {
-                console.error('Error notifying user about thread closure:', error);
-            }
+    if (!userId) return;
+
+    try {
+        const user = await client.users.fetch(userId);
+
+        if (!oldThread.archived && newThread.archived) {
+            // The thread was just archived
+            const embed = new EmbedBuilder()
+                .setColor(0xff0000) // Red color
+                .setTitle('Support Team')
+                .setDescription('The support team has closed this thread.')
+                .setTimestamp();
+
+            await user.send({ embeds: [embed] });
+        } else if (oldThread.archived && !newThread.archived) {
+            // The thread was just unarchived (reopened)
+            const embed = new EmbedBuilder()
+                .setColor(0x00ff00) // Green color
+                .setTitle('Support Team')
+                .setDescription('The support team has reopened this thread.')
+                .setTimestamp();
+
+            await user.send({ embeds: [embed] });
         }
+    } catch (error) {
+        console.error('Error notifying user about thread update:', error);
     }
 });
 

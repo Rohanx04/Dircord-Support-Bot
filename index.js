@@ -9,7 +9,7 @@ const client = new Client({
     ],
     partials: [Partials.Channel],
 });
-
+// Add token in the environement 
 const token = process.env.DISCORD_BOT_TOKEN;
 const channelId = process.env.DISCORD_CHANNEL_ID;
 
@@ -20,7 +20,7 @@ const port = process.env.PORT || 3000;
 app.get('/', (req, res) => {
     res.send('Bot is running!');
 });
-
+//Bot run checks
 app.listen(port, () => {
     console.log(`HTTP server running on port ${port}`);
 });
@@ -28,7 +28,7 @@ app.listen(port, () => {
 client.on('ready', () => {
     console.log(`Logged in as ${client.user.tag}!`);
 });
-
+//login checks
 const userThreads = new Map();
 
 client.on('messageCreate', async message => {
@@ -126,7 +126,7 @@ client.on('threadUpdate', async (oldThread, newThread) => {
         console.error('Error notifying user about thread update:', error);
     }
 });
-
+//add login token to the environement
 client.login(token).catch(error => {
     console.error('Failed to login:', error);
 });

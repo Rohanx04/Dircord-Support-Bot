@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, REST, Routes } = require('discord.js');
 const express = require('express');
 const client = new Client({
     intents: [
@@ -9,7 +9,8 @@ const client = new Client({
     ],
     partials: [Partials.Channel],
 });
-// Add token in the environement 
+
+// Add token in the environment
 const token = process.env.DISCORD_BOT_TOKEN;
 const channelId = process.env.DISCORD_CHANNEL_ID;
 
@@ -20,15 +21,76 @@ const port = process.env.PORT || 3000;
 app.get('/', (req, res) => {
     res.send('Bot is running!');
 });
-//Bot run checks
+
+// Bot run checks
 app.listen(port, () => {
     console.log(`HTTP server running on port ${port}`);
 });
 
-client.on('ready', () => {
+// Initialize slash commands
+client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
+
+    // Register slash command
+    const rest = new REST({ version: '10' }).setToken(token);
+    try {
+        console.log('Started refreshing application (/) commands.');
+        await rest.put(Routes.applicationCommands(client.user.id), {
+            body: [
+                {
+                    name: 'add_user',
+                    description: 'Creates a new thread and adds the mentioned user',
+                    options: [
+                        {
+                            name: 'user',
+                            description: 'The user to add to the thread',
+                            type: 6, // 6 is the type for a user mention
+                            required: true
+                        }
+                    ]
+                }
+            ]
+        });
+        console.log('Successfully registered application (/) commands.');
+    } catch (error) {
+        console.error(error);
+    }
 });
-//login checks
+
+// Handling slash commands
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isCommand()) return;
+
+    const { commandName } = interaction;
+
+    if (commandName === 'add_user') {
+        const user = interaction.options.getUser('user');
+        const targetChannel = await client.channels.fetch(channelId);
+        if (!targetChannel.isTextBased()) {
+            return interaction.reply('The target channel is not a text-based channel!');
+        }
+
+        try {
+            // Create a thread with the user's tag in the name
+            const threadName = `Support Thread with ${user.tag}`;
+            const thread = await targetChannel.threads.create({
+                name: threadName,
+                autoArchiveDuration: 60, // Auto-archive after 1 hour of inactivity
+                reason: `Support thread created with ${user.tag}`
+            });
+
+            // DM the user
+            await user.send('You have been added to a new support thread by the support team.');
+            await interaction.reply(`Thread created and ${user.tag} has been notified via DM.`);
+
+        } catch (error) {
+            console.error('Error creating thread or sending DM:', error);
+            return interaction.reply('There was an error while creating the thread or DMing the user.');
+        }
+    }
+});
+
+// Existing feature: Handle DMs from users
 const userThreads = new Map();
 
 client.on('messageCreate', async message => {
@@ -126,7 +188,8 @@ client.on('threadUpdate', async (oldThread, newThread) => {
         console.error('Error notifying user about thread update:', error);
     }
 });
-//add login token to the environement
+
+// Add login token to the environment
 client.login(token).catch(error => {
     console.error('Failed to login:', error);
 });

@@ -76,11 +76,11 @@ const rest = new REST({ version: '10' }).setToken(token);
         console.log('Started refreshing application (/) commands.');
         await rest.put(
             Routes.applicationCommands(client.user.id),
-            { body: commands },
+            { body: commands.map(command => command.toJSON()) },
         );
         console.log('Successfully reloaded application (/) commands.');
     } catch (error) {
-        console.error(error);
+        console.error('Error registering commands:', error);
     }
 })();
 
@@ -95,125 +95,145 @@ client.on('interactionCreate', async interaction => {
 
     const { commandName, options } = interaction;
 
-    if (commandName === 'add_user') {
-        const user = options.getUser('user');
-        const targetChannel = await client.channels.fetch(channelId);
+    try {
+        if (commandName === 'add_user') {
+            const user = options.getUser('user');
+            const targetChannel = await client.channels.fetch(channelId);
 
-        let thread = await targetChannel.threads.create({
-            name: `DM with ${user.tag}`,
-            autoArchiveDuration: 60,
-            reason: `DM with ${user.tag}`,
-        });
+            let thread = await targetChannel.threads.create({
+                name: `DM with ${user.tag}`,
+                autoArchiveDuration: 60,
+                reason: `DM with ${user.tag}`,
+            });
 
-        userThreads.set(user.id, thread);
-        await interaction.reply({ content: `Thread created with ${user.tag}.`, ephemeral: true });
-    }
+            userThreads.set(user.id, thread);
+            await interaction.reply({ content: `Thread created with ${user.tag}.`, ephemeral: true });
+        }
 
-    if (commandName === 'add_role') {
-        const member = options.getUser('user');
-        const role = options.getRole('role');
+        if (commandName === 'add_role') {
+            const member = options.getUser('user');
+            const role = options.getRole('role');
 
-        const guildMember = await interaction.guild.members.fetch(member.id);
-        await guildMember.roles.add(role);
-        await interaction.reply({ content: `${role.name} added to ${member.tag}`, ephemeral: true });
-    }
+            const guildMember = await interaction.guild.members.fetch(member.id);
+            await guildMember.roles.add(role);
+            await interaction.reply({ content: `${role.name} added to ${member.tag}`, ephemeral: true });
+        }
 
-    if (commandName === 'remove_role') {
-        const member = options.getUser('user');
-        const role = options.getRole('role');
+        if (commandName === 'remove_role') {
+            const member = options.getUser('user');
+            const role = options.getRole('role');
 
-        const guildMember = await interaction.guild.members.fetch(member.id);
-        await guildMember.roles.remove(role);
-        await interaction.reply({ content: `${role.name} removed from ${member.tag}`, ephemeral: true });
-    }
+            const guildMember = await interaction.guild.members.fetch(member.id);
+            await guildMember.roles.remove(role);
+            await interaction.reply({ content: `${role.name} removed from ${member.tag}`, ephemeral: true });
+        }
 
-    if (commandName === 'mute') {
-        const member = options.getUser('user');
-        const time = options.getString('time') || '1h'; // Default mute time if not specified
+        if (commandName === 'mute') {
+            const member = options.getUser('user');
+            const time = options.getString('time') || '1h'; // Default mute time if not specified
 
-        // Mute implementation here (requires managing mute role and logic)
-        await interaction.reply({ content: `${member.tag} has been muted for ${time}`, ephemeral: true });
-    }
+            // Mute implementation here
+            await interaction.reply({ content: `${member.tag} has been muted for ${time}`, ephemeral: true });
+        }
 
-    if (commandName === 'unmute') {
-        const member = options.getUser('user');
+        if (commandName === 'unmute') {
+            const member = options.getUser('user');
 
-        // Unmute implementation here (requires managing mute role and logic)
-        await interaction.reply({ content: `${member.tag} has been unmuted`, ephemeral: true });
-    }
+            // Unmute implementation here
+            await interaction.reply({ content: `${member.tag} has been unmuted`, ephemeral: true });
+        }
 
-    if (commandName === 'warn') {
-        const member = options.getUser('user');
-        const reason = options.getString('reason') || 'No reason provided';
+        if (commandName === 'warn') {
+            const member = options.getUser('user');
+            const reason = options.getString('reason') || 'No reason provided';
 
-        // Warn implementation here (e.g., log to a database or channel)
-        await interaction.reply({ content: `${member.tag} has been warned. Reason: ${reason}`, ephemeral: true });
-    }
+            // Warn implementation here
+            await interaction.reply({ content: `${member.tag} has been warned. Reason: ${reason}`, ephemeral: true });
+        }
 
-    if (commandName === 'clear') {
-        const amount = options.getInteger('amount');
+        if (commandName === 'clear') {
+            const amount = options.getInteger('amount');
 
-        // Clear messages implementation here
-        await interaction.reply({ content: `Cleared ${amount} messages.`, ephemeral: true });
-    }
+            // Clear messages implementation here
+            await interaction.reply({ content: `Cleared ${amount} messages.`, ephemeral: true });
+        }
 
-    if (commandName === 'tempban') {
-        const member = options.getUser('user');
-        const time = options.getString('time');
+        if (commandName === 'tempban') {
+            const member = options.getUser('user');
+            const time = options.getString('time');
 
-        // Tempban implementation here
-        await interaction.reply({ content: `${member.tag} has been temporarily banned for ${time}`, ephemeral: true });
-    }
+            // Tempban implementation here
+            await interaction.reply({ content: `${member.tag} has been temporarily banned for ${time}`, ephemeral: true });
+        }
 
-    if (commandName === 'softban') {
-        const member = options.getUser('user');
-        const reason = options.getString('reason') || 'No reason provided';
+        if (commandName === 'softban') {
+            const member = options.getUser('user');
+            const reason = options.getString('reason') || 'No reason provided';
 
-        // Softban implementation here
-        await interaction.reply({ content: `${member.tag} has been softbanned. Reason: ${reason}`, ephemeral: true });
-    }
+            // Softban implementation here
+            await interaction.reply({ content: `${member.tag} has been softbanned. Reason: ${reason}`, ephemeral: true });
+        }
 
-    if (commandName === 'serverinfo') {
-        // Display server information
-        const serverInfo = `Server name: ${interaction.guild.name}\nTotal members: ${interaction.guild.memberCount}`;
-        await interaction.reply({ content: serverInfo, ephemeral: true });
-    }
+        if (commandName === 'serverinfo') {
+            const guild = interaction.guild;
+            const embed = new EmbedBuilder()
+                .setColor(0x0099ff)
+                .setTitle('Server Information')
+                .addFields(
+                    { name: 'Server Name', value: guild.name, inline: true },
+                    { name: 'Total Members', value: `${guild.memberCount}`, inline: true },
+                )
+                .setTimestamp();
 
-    if (commandName === 'userinfo') {
-        const user = options.getUser('user');
-        const member = await interaction.guild.members.fetch(user.id);
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+        }
 
-        const userInfo = `Username: ${user.tag}\nJoined at: ${member.joinedAt}`;
-        await interaction.reply({ content: userInfo, ephemeral: true });
-    }
+        if (commandName === 'userinfo') {
+            const user = options.getUser('user');
+            const member = await interaction.guild.members.fetch(user.id);
+            const embed = new EmbedBuilder()
+                .setColor(0x0099ff)
+                .setTitle('User Information')
+                .addFields(
+                    { name: 'Username', value: user.tag, inline: true },
+                    { name: 'Joined Server', value: member.joinedAt.toDateString(), inline: true },
+                )
+                .setTimestamp();
 
-    if (commandName === 'lock') {
-        const channel = interaction.channel;
-        await channel.permissionOverwrites.edit(interaction.guild.id, { SEND_MESSAGES: false });
-        await interaction.reply({ content: `Channel ${channel.name} has been locked.`, ephemeral: true });
-    }
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+        }
 
-    if (commandName === 'unlock') {
-        const channel = interaction.channel;
-        await channel.permissionOverwrites.edit(interaction.guild.id, { SEND_MESSAGES: true });
-        await interaction.reply({ content: `Channel ${channel.name} has been unlocked.`, ephemeral: true });
-    }
+        if (commandName === 'lock') {
+            const channel = interaction.channel;
+            await channel.permissionOverwrites.edit(interaction.guild.id, { SEND_MESSAGES: false });
+            await interaction.reply({ content: `Channel ${channel.name} has been locked.`, ephemeral: true });
+        }
 
-    if (commandName === 'nick') {
-        const member = options.getUser('user');
-        const newNickname = options.getString('new_nickname');
+        if (commandName === 'unlock') {
+            const channel = interaction.channel;
+            await channel.permissionOverwrites.edit(interaction.guild.id, { SEND_MESSAGES: true });
+            await interaction.reply({ content: `Channel ${channel.name} has been unlocked.`, ephemeral: true });
+        }
 
-        const guildMember = await interaction.guild.members.fetch(member.id);
-        await guildMember.setNickname(newNickname);
-        await interaction.reply({ content: `Nickname for ${member.tag} has been changed to ${newNickname}`, ephemeral: true });
-    }
+        if (commandName === 'nick') {
+            const member = options.getUser('user');
+            const newNickname = options.getString('new_nickname');
 
-    if (commandName === 'resetnick') {
-        const member = options.getUser('user');
+            const guildMember = await interaction.guild.members.fetch(member.id);
+            await guildMember.setNickname(newNickname);
+            await interaction.reply({ content: `Nickname for ${member.tag} has been changed to ${newNickname}`, ephemeral: true });
+        }
 
-        const guildMember = await interaction.guild.members.fetch(member.id);
-        await guildMember.setNickname(null);
-        await interaction.reply({ content: `Nickname for ${member.tag} has been reset.`, ephemeral: true });
+        if (commandName === 'resetnick') {
+            const member = options.getUser('user');
+
+            const guildMember = await interaction.guild.members.fetch(member.id);
+            await guildMember.setNickname(null);
+            await interaction.reply({ content: `Nickname for ${member.tag} has been reset.`, ephemeral: true });
+        }
+    } catch (error) {
+        console.error('Error handling command:', error);
+        await interaction.reply({ content: 'There was an error executing the command.', ephemeral: true });
     }
 });
 

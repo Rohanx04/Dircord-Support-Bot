@@ -10,7 +10,7 @@ const client = new Client({
     partials: [Partials.Channel],
 });
 
-// Add token in the environment
+// Add token in the environment 
 const token = process.env.DISCORD_BOT_TOKEN;
 const channelId = process.env.DISCORD_CHANNEL_ID;
 
@@ -90,7 +90,7 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Existing feature: Handle DMs from users
+// Handle DMs from users
 const userThreads = new Map();
 
 client.on('messageCreate', async message => {
@@ -156,7 +156,7 @@ client.on('messageCreate', async message => {
     }
 });
 
-// Listen for thread updates to detect when a thread is archived or unarchived
+// Notify user when thread is closed or deleted
 client.on('threadUpdate', async (oldThread, newThread) => {
     const userId = [...userThreads.entries()].find(([, thread]) => thread.id === newThread.id)?.[0];
 
@@ -174,6 +174,8 @@ client.on('threadUpdate', async (oldThread, newThread) => {
                 .setTimestamp();
 
             await user.send({ embeds: [embed] });
+            userThreads.delete(userId); // Remove the thread from the map since it is archived
+
         } else if (oldThread.archived && !newThread.archived) {
             // The thread was just unarchived (reopened)
             const embed = new EmbedBuilder()
@@ -186,6 +188,32 @@ client.on('threadUpdate', async (oldThread, newThread) => {
         }
     } catch (error) {
         console.error('Error notifying user about thread update:', error);
+    }
+});
+
+// Forward messages from the thread to the user
+client.on('messageCreate', async message => {
+    if (!message.guild) return; // Only care about messages in the guild (threads)
+    if (message.author.bot) return; // Ignore bot messages
+
+    const threadId = message.channelId;
+    const userId = [...userThreads.entries()].find(([, thread]) => thread.id === threadId)?.[0];
+
+    if (!userId) return;
+
+    try {
+        const user = await client.users.fetch(userId);
+
+        const embed = new EmbedBuilder()
+            .setColor(0x00ff00) // Green color
+            .setTitle('Support Team')
+            .setDescription(message.content)
+            .setTimestamp()
+            .setFooter({ text: `From ${message.author.tag}` });
+
+        await user.send({ embeds: [embed] });
+    } catch (error) {
+        console.error('Error forwarding message to user:', error);
     }
 });
 

@@ -57,6 +57,9 @@ client.once('ready', async () => {
     }
 });
 
+// A map to store user threads
+const userThreads = new Map();
+
 // Handling slash commands
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
@@ -70,29 +73,35 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply('The target channel is not a text-based channel!');
         }
 
-        try {
-            // Create a thread with the user's tag in the name
-            const threadName = `Support Thread with ${user.tag}`;
-            const thread = await targetChannel.threads.create({
-                name: threadName,
-                autoArchiveDuration: 60, // Auto-archive after 1 hour of inactivity
-                reason: `Support thread created with ${user.tag}`
-            });
+        // Check if a thread already exists for this user
+        let thread = userThreads.get(user.id);
+        if (!thread) {
+            try {
+                // Create a thread with the user's tag in the name
+                const threadName = `Support Thread with ${user.tag}`;
+                thread = await targetChannel.threads.create({
+                    name: threadName,
+                    autoArchiveDuration: 60, // Auto-archive after 1 hour of inactivity
+                    reason: `Support thread created with ${user.tag}`
+                });
 
-            // DM the user
-            await user.send('You have been added to a new support thread by the support team.');
-            await interaction.reply(`Thread created and ${user.tag} has been notified via DM.`);
+                // Store the thread in the map
+                userThreads.set(user.id, thread);
 
-        } catch (error) {
-            console.error('Error creating thread or sending DM:', error);
-            return interaction.reply('There was an error while creating the thread or DMing the user.');
+                // DM the user
+                await user.send('You have been added to a new support thread by the support team.');
+                await interaction.reply(`Thread created and ${user.tag} has been notified via DM.`);
+            } catch (error) {
+                console.error('Error creating thread or sending DM:', error);
+                return interaction.reply('There was an error while creating the thread or DMing the user.');
+            }
+        } else {
+            await interaction.reply(`An active thread already exists for ${user.tag}.`);
         }
     }
 });
 
 // Handle DMs from users
-const userThreads = new Map();
-
 client.on('messageCreate', async message => {
     if (message.guild) return; // Ignore messages from guilds (servers)
     if (message.author.bot) return; // Ignore messages from other bots
@@ -107,8 +116,8 @@ client.on('messageCreate', async message => {
     const userId = message.author.id;
     let thread = userThreads.get(userId);
 
+    // Check if a thread with the user's name already exists
     if (!thread) {
-        // Check if a thread with the user's name already exists
         const existingThreads = await targetChannel.threads.fetchActive();
         thread = existingThreads.threads.find(t => t.name === `DM from ${message.author.tag}`);
 
@@ -136,21 +145,6 @@ client.on('messageCreate', async message => {
     try {
         await thread.send(message.content);
         await message.react('✅'); // React to the user's message with a checkmark emoji
-
-        // Create a message collector to listen for new messages in the thread
-        const filter = m => m.channelId === thread.id && m.author.id !== client.user.id;
-        const collector = thread.createMessageCollector({ filter, time: 600000 }); // 10 minutes timeout
-        collector.on('collect', async collectedMessage => {
-            // Send the message back to the original user who initiated the conversation as an embed
-            const embed = new EmbedBuilder()
-                .setColor(0x00ff00) // Green color
-                .setTitle('Support Team')
-                .setDescription(collectedMessage.content)
-                .setTimestamp()
-                .setFooter({ text: `From ${collectedMessage.author.tag}` });
-
-            await message.author.send({ embeds: [embed] });
-        });
     } catch (error) {
         console.error('Error sending message to thread:', error);
     }
@@ -193,27 +187,26 @@ client.on('threadUpdate', async (oldThread, newThread) => {
 
 // Forward messages from the thread to the user
 client.on('messageCreate', async message => {
-    if (!message.guild) return; // Only care about messages in the guild (threads)
-    if (message.author.bot) return; // Ignore bot messages
+    if (message.guild && message.channel.isThread()) {
+        const threadId = message.channelId;
+        const userId = [...userThreads.entries()].find(([, thread]) => thread.id === threadId)?.[0];
 
-    const threadId = message.channelId;
-    const userId = [...userThreads.entries()].find(([, thread]) => thread.id === threadId)?.[0];
+        if (!userId) return;
 
-    if (!userId) return;
+        try {
+            const user = await client.users.fetch(userId);
 
-    try {
-        const user = await client.users.fetch(userId);
+            const embed = new EmbedBuilder()
+                .setColor(0x00ff00) // Green color
+                .setTitle('Support Team')
+                .setDescription(message.content)
+                .setTimestamp()
+                .setFooter({ text: `From ${message.author.tag}` });
 
-        const embed = new EmbedBuilder()
-            .setColor(0x00ff00) // Green color
-            .setTitle('Support Team')
-            .setDescription(message.content)
-            .setTimestamp()
-            .setFooter({ text: `From ${message.author.tag}` });
-
-        await user.send({ embeds: [embed] });
-    } catch (error) {
-        console.error('Error forwarding message to user:', error);
+            await user.send({ embeds: [embed] });
+        } catch (error) {
+            console.error('Error forwarding message to user:', error);
+        }
     }
 });
 

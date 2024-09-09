@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, REST, Routes } = require('discord.js');
 const express = require('express');
 const client = new Client({
     intents: [
@@ -10,9 +10,9 @@ const client = new Client({
     partials: [Partials.Channel],
 });
 
-// Add token in the environment
 const token = process.env.DISCORD_BOT_TOKEN;
 const channelId = process.env.DISCORD_CHANNEL_ID;
+const rest = new REST({ version: '10' }).setToken(token);
 
 // Set up an Express server
 const app = express();
@@ -21,103 +21,53 @@ const port = process.env.PORT || 3000;
 app.get('/', (req, res) => {
     res.send('Bot is running!');
 });
-
-// Bot run checks
 app.listen(port, () => {
     console.log(`HTTP server running on port ${port}`);
 });
 
-client.on('ready', () => {
+// Handle bot login
+client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
+    await registerSlashCommands(); // Register the slash commands
 });
 
-// Store user thread references
+// Map to store user thread info
 const userThreads = new Map();
 
-client.on('messageCreate', async (message) => {
-    if (message.guild) return; // Ignore messages from guilds (servers)
-    if (message.author.bot) return; // Ignore messages from other bots
+client.on('messageCreate', async message => {
+    if (message.guild || message.author.bot) return;
 
-    // Fetch the target channel
-    const targetChannel = await client.channels.fetch(channelId);
-    if (!targetChannel.isTextBased()) {
-        console.error('The target channel was not found or is not a text-based channel!');
-        return;
-    }
-
-    const userId = message.author.id;
-    let thread = userThreads.get(userId);
-
-    // Check if a thread with the user's name already exists
-    if (!thread) {
-        const existingThreads = await targetChannel.threads.fetchActive();
-        thread = existingThreads.threads.find(t => t.name === `DM from ${message.author.tag}`);
-
-        if (!thread) {
-            // Fetch archived threads and check if the user's thread is archived
-            const archivedThreads = await targetChannel.threads.fetchArchived();
-            thread = archivedThreads.threads.find(t => t.name === `DM from ${message.author.tag}`);
-
-            if (thread) {
-                // Unarchive the thread
-                await thread.setArchived(false);
-                userThreads.set(userId, thread);
-                await message.author.send('Your support thread has been reopened.');
-            } else {
-                // Create a new thread if no existing thread is found
-                const threadName = `DM from ${message.author.tag}`;
-                try {
-                    thread = await targetChannel.threads.create({
-                        name: threadName,
-                        autoArchiveDuration: 60, // Auto-archive after 1 hour of inactivity
-                        reason: `Created for DM from ${message.author.tag}`,
-                    });
-                    userThreads.set(userId, thread);
-                } catch (error) {
-                    console.error('Error creating thread:', error);
-                    return;
-                }
-            }
-        } else {
-            userThreads.set(userId, thread);
-        }
-    }
-
-    // Send the user's message directly to the thread
+    let thread = await findOrCreateThread(message.author);
+    
+    if (!thread) return; // If no thread is found or created, return
     try {
         await thread.send(message.content);
-        await message.react('✅'); // React to the user's message with a checkmark emoji
+        await message.react('✅'); // React with a checkmark
     } catch (error) {
         console.error('Error sending message to thread:', error);
     }
 });
 
-// Listen for thread updates to detect when a thread is archived or unarchived
 client.on('threadUpdate', async (oldThread, newThread) => {
     const userId = [...userThreads.entries()].find(([, thread]) => thread.id === newThread.id)?.[0];
 
     if (!userId) return;
+    const user = await client.users.fetch(userId);
 
     try {
-        const user = await client.users.fetch(userId);
-
         if (!oldThread.archived && newThread.archived) {
-            // The thread was just archived
             const embed = new EmbedBuilder()
-                .setColor(0xff0000) // Red color
+                .setColor(0xff0000)
                 .setTitle('Support Team')
                 .setDescription('The support team has closed this thread.')
                 .setTimestamp();
-
             await user.send({ embeds: [embed] });
         } else if (oldThread.archived && !newThread.archived) {
-            // The thread was just unarchived (reopened)
             const embed = new EmbedBuilder()
-                .setColor(0x00ff00) // Green color
+                .setColor(0x00ff00)
                 .setTitle('Support Team')
                 .setDescription('The support team has reopened this thread.')
                 .setTimestamp();
-
             await user.send({ embeds: [embed] });
         }
     } catch (error) {
@@ -125,86 +75,210 @@ client.on('threadUpdate', async (oldThread, newThread) => {
     }
 });
 
-// Listen for thread deletion events
-client.on('threadDelete', async (thread) => {
-    const userId = [...userThreads.entries()].find(([, t]) => t.id === thread.id)?.[0];
+// Function to find or create a thread for a user
+async function findOrCreateThread(user) {
+    const targetChannel = await client.channels.fetch(channelId);
+    if (!targetChannel.isTextBased()) {
+        console.error('The target channel is not a text-based channel!');
+        return null;
+    }
 
-    if (userId) {
-        try {
-            const user = await client.users.fetch(userId);
-            await user.send('Your support thread has been deleted or closed by the support team.');
-            userThreads.delete(userId); // Remove the thread from the map
-        } catch (error) {
-            console.error('Error notifying user about thread deletion:', error);
+    let thread = userThreads.get(user.id);
+
+    if (!thread) {
+        const existingThreads = await targetChannel.threads.fetchActive();
+        thread = existingThreads.threads.find(t => t.name === `DM from ${user.tag}`);
+
+        if (!thread) {
+            try {
+                thread = await targetChannel.threads.create({
+                    name: `DM from ${user.tag}`,
+                    autoArchiveDuration: 60, // Auto-archive after 1 hour of inactivity
+                    reason: `Created for DM from ${user.tag}`,
+                });
+                userThreads.set(user.id, thread);
+            } catch (error) {
+                console.error('Error creating thread:', error);
+                return null;
+            }
+        } else {
+            userThreads.set(user.id, thread);
         }
     }
-});
 
-// Command to open a thread with a user
+    return thread;
+}
+
+// Slash commands handler
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
 
-    const { commandName, options } = interaction;
+    const { commandName } = interaction;
 
-    if (commandName === 'add_user') {
-        const userToAdd = options.getUser('user');
+    if (commandName === 'add_role') {
+        const member = interaction.options.getMember('user');
+        const role = interaction.options.getRole('role');
 
-        if (!userToAdd) {
-            await interaction.reply('User not found!');
-            return;
-        }
-
-        // Fetch the target channel
-        const targetChannel = await client.channels.fetch(channelId);
-        if (!targetChannel.isTextBased()) {
-            console.error('The target channel was not found or is not a text-based channel!');
-            await interaction.reply('Error: Could not find the target channel.');
-            return;
-        }
-
-        let thread = userThreads.get(userToAdd.id);
-
-        // Check if an existing thread is available
-        if (!thread) {
-            const existingThreads = await targetChannel.threads.fetchActive();
-            thread = existingThreads.threads.find(t => t.name === `DM from ${userToAdd.tag}`);
-
-            if (!thread) {
-                const archivedThreads = await targetChannel.threads.fetchArchived();
-                thread = archivedThreads.threads.find(t => t.name === `DM from ${userToAdd.tag}`);
-
-                if (thread) {
-                    // Unarchive the thread
-                    await thread.setArchived(false);
-                    userThreads.set(userToAdd.id, thread);
-                    await userToAdd.send('Your support thread has been reopened.');
-                } else {
-                    const threadName = `DM from ${userToAdd.tag}`;
-                    try {
-                        thread = await targetChannel.threads.create({
-                            name: threadName,
-                            autoArchiveDuration: 60, // Auto-archive after 1 hour of inactivity
-                            reason: `Created for DM from ${userToAdd.tag}`,
-                        });
-                        userThreads.set(userToAdd.id, thread);
-                        await userToAdd.send('A support thread has been created for you.');
-                    } catch (error) {
-                        console.error('Error creating thread:', error);
-                        await interaction.reply('Error creating a new thread for the user.');
-                        return;
-                    }
-                }
-            } else {
-                userThreads.set(userToAdd.id, thread);
+        if (member && role) {
+            try {
+                await member.roles.add(role);
+                await interaction.reply(`Added role ${role.name} to ${member.user.tag}`);
+            } catch (error) {
+                await interaction.reply('Failed to add role.');
+                console.error(error);
             }
         }
+    } else if (commandName === 'remove_role') {
+        const member = interaction.options.getMember('user');
+        const role = interaction.options.getRole('role');
 
-        // Notify the support team
-        await interaction.reply(`User ${userToAdd.tag} has been added. A support thread has been opened.`);
+        if (member && role) {
+            try {
+                await member.roles.remove(role);
+                await interaction.reply(`Removed role ${role.name} from ${member.user.tag}`);
+            } catch (error) {
+                await interaction.reply('Failed to remove role.');
+                console.error(error);
+            }
+        }
+    } else if (commandName === 'kick') {
+        const member = interaction.options.getMember('user');
+        const reason = interaction.options.getString('reason') || 'No reason provided';
+
+        if (member) {
+            try {
+                await member.kick(reason);
+                await interaction.reply(`${member.user.tag} has been kicked. Reason: ${reason}`);
+            } catch (error) {
+                await interaction.reply('Failed to kick the user.');
+                console.error(error);
+            }
+        }
+    } else if (commandName === 'ban') {
+        const member = interaction.options.getMember('user');
+        const reason = interaction.options.getString('reason') || 'No reason provided';
+
+        if (member) {
+            try {
+                await member.ban({ reason });
+                await interaction.reply(`${member.user.tag} has been banned. Reason: ${reason}`);
+            } catch (error) {
+                await interaction.reply('Failed to ban the user.');
+                console.error(error);
+            }
+        }
+    } else if (commandName === 'unban') {
+        const user = interaction.options.getUser('user');
+        if (user) {
+            try {
+                await interaction.guild.bans.remove(user);
+                await interaction.reply(`${user.tag} has been unbanned.`);
+            } catch (error) {
+                await interaction.reply('Failed to unban the user.');
+                console.error(error);
+            }
+        }
     }
 });
 
-// Add login token to the environment
+// Slash commands registration
+async function registerSlashCommands() {
+    const commands = [
+        {
+            name: 'add_role',
+            description: 'Add a role to a user',
+            options: [
+                {
+                    name: 'user',
+                    type: 6, // USER type
+                    description: 'The user to whom the role will be added',
+                    required: true,
+                },
+                {
+                    name: 'role',
+                    type: 8, // ROLE type
+                    description: 'The role to add',
+                    required: true,
+                },
+            ],
+        },
+        {
+            name: 'remove_role',
+            description: 'Remove a role from a user',
+            options: [
+                {
+                    name: 'user',
+                    type: 6, // USER type
+                    description: 'The user from whom the role will be removed',
+                    required: true,
+                },
+                {
+                    name: 'role',
+                    type: 8, // ROLE type
+                    description: 'The role to remove',
+                    required: true,
+                },
+            ],
+        },
+        {
+            name: 'kick',
+            description: 'Kick a user from the server',
+            options: [
+                {
+                    name: 'user',
+                    type: 6, // USER type
+                    description: 'The user to kick',
+                    required: true,
+                },
+                {
+                    name: 'reason',
+                    type: 3, // STRING type
+                    description: 'The reason for kicking',
+                    required: false,
+                },
+            ],
+        },
+        {
+            name: 'ban',
+            description: 'Ban a user from the server',
+            options: [
+                {
+                    name: 'user',
+                    type: 6, // USER type
+                    description: 'The user to ban',
+                    required: true,
+                },
+                {
+                    name: 'reason',
+                    type: 3, // STRING type
+                    description: 'The reason for banning',
+                    required: false,
+                },
+            ],
+        },
+        {
+            name: 'unban',
+            description: 'Unban a user',
+            options: [
+                {
+                    name: 'user',
+                    type: 6, // USER type
+                    description: 'The user to unban',
+                    required: true,
+                },
+            ],
+        },
+    ];
+
+    try {
+        console.log('Started refreshing application (/) commands.');
+        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+        console.log('Successfully reloaded application (/) commands.');
+    } catch (error) {
+        console.error(error);
+    }
+}
+
 client.login(token).catch(error => {
     console.error('Failed to login:', error);
 });

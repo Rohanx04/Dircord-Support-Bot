@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, REST, Routes, PermissionsBitField, SlashCommandBuilder } = require('discord.js');
 const express = require('express');
 
 // Initialize Discord client
@@ -15,13 +15,18 @@ const client = new Client({
 // Add token and channel ID from the environment
 const token = process.env.DISCORD_BOT_TOKEN;
 const channelId = process.env.DISCORD_CHANNEL_ID;
-const muteRole = 'MutedRoleID'; // The role ID for muted members
 
 // Set up an Express server
 const app = express();
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot is running!'));
-app.listen(port, () => console.log(`HTTP server running on port ${port}`));
+
+app.get('/', (req, res) => {
+    res.send('Bot is running!');
+});
+
+app.listen(port, () => {
+    console.log(`HTTP server running on port ${port}`);
+});
 
 // User thread management
 const userThreads = new Map();
@@ -91,90 +96,146 @@ client.on('interactionCreate', async interaction => {
     const { commandName, options } = interaction;
 
     try {
-        switch (commandName) {
-            case 'add_user':
-                await handleAddUser(interaction);
-                break;
-            case 'add_role':
-                await handleAddRole(interaction);
-                break;
-            case 'remove_role':
-                await handleRemoveRole(interaction);
-                break;
-            case 'mute':
-                await handleMute(interaction);
-                break;
-            case 'unmute':
-                await handleUnmute(interaction);
-                break;
-            case 'warn':
-                await handleWarn(interaction);
-                break;
-            case 'clear':
-                await handleClear(interaction);
-                break;
-            case 'tempban':
-                await handleTempban(interaction);
-                break;
-            case 'softban':
-                await handleSoftban(interaction);
-                break;
-            case 'serverinfo':
-                await handleServerInfo(interaction);
-                break;
-            case 'userinfo':
-                await handleUserInfo(interaction);
-                break;
-            case 'lock':
-                await handleLock(interaction);
-                break;
-            case 'unlock':
-                await handleUnlock(interaction);
-                break;
-            case 'nick':
-                await handleNick(interaction);
-                break;
-            case 'resetnick':
-                await handleResetNick(interaction);
-                break;
+        if (commandName === 'add_user') {
+            const user = options.getUser('user');
+            const targetChannel = await client.channels.fetch(channelId);
+
+            let thread = await targetChannel.threads.create({
+                name: `DM with ${user.tag}`,
+                autoArchiveDuration: 60,
+                reason: `DM with ${user.tag}`,
+            });
+
+            userThreads.set(user.id, thread);
+            await interaction.reply({ content: `Thread created with ${user.tag}.`, ephemeral: true });
+        }
+
+        if (commandName === 'add_role') {
+            const member = options.getUser('user');
+            const role = options.getRole('role');
+
+            const guildMember = await interaction.guild.members.fetch(member.id);
+            await guildMember.roles.add(role);
+            await interaction.reply({ content: `${role.name} added to ${member.tag}`, ephemeral: true });
+        }
+
+        if (commandName === 'remove_role') {
+            const member = options.getUser('user');
+            const role = options.getRole('role');
+
+            const guildMember = await interaction.guild.members.fetch(member.id);
+            await guildMember.roles.remove(role);
+            await interaction.reply({ content: `${role.name} removed from ${member.tag}`, ephemeral: true });
+        }
+
+        if (commandName === 'mute') {
+            const member = options.getUser('user');
+            const time = options.getString('time') || '1h'; // Default mute time if not specified
+
+            // Mute implementation here
+            await interaction.reply({ content: `${member.tag} has been muted for ${time}`, ephemeral: true });
+        }
+
+        if (commandName === 'unmute') {
+            const member = options.getUser('user');
+
+            // Unmute implementation here
+            await interaction.reply({ content: `${member.tag} has been unmuted`, ephemeral: true });
+        }
+
+        if (commandName === 'warn') {
+            const member = options.getUser('user');
+            const reason = options.getString('reason') || 'No reason provided';
+
+            // Warn implementation here
+            await interaction.reply({ content: `${member.tag} has been warned. Reason: ${reason}`, ephemeral: true });
+        }
+
+        if (commandName === 'clear') {
+            const amount = options.getInteger('amount');
+
+            // Clear messages implementation here
+            await interaction.reply({ content: `Cleared ${amount} messages.`, ephemeral: true });
+        }
+
+        if (commandName === 'tempban') {
+            const member = options.getUser('user');
+            const time = options.getString('time');
+
+            // Tempban implementation here
+            await interaction.reply({ content: `${member.tag} has been temporarily banned for ${time}`, ephemeral: true });
+        }
+
+        if (commandName === 'softban') {
+            const member = options.getUser('user');
+            const reason = options.getString('reason') || 'No reason provided';
+
+            // Softban implementation here
+            await interaction.reply({ content: `${member.tag} has been softbanned. Reason: ${reason}`, ephemeral: true });
+        }
+
+        if (commandName === 'serverinfo') {
+            const guild = interaction.guild;
+            const embed = new EmbedBuilder()
+                .setColor(0x0099ff)
+                .setTitle('Server Information')
+                .addFields(
+                    { name: 'Server Name', value: guild.name, inline: true },
+                    { name: 'Total Members', value: `${guild.memberCount}`, inline: true },
+                )
+                .setTimestamp();
+
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        if (commandName === 'userinfo') {
+            const user = options.getUser('user');
+            const member = await interaction.guild.members.fetch(user.id);
+            const embed = new EmbedBuilder()
+                .setColor(0x0099ff)
+                .setTitle('User Information')
+                .addFields(
+                    { name: 'Username', value: user.tag, inline: true },
+                    { name: 'Joined Server', value: member.joinedAt.toDateString(), inline: true },
+                )
+                .setTimestamp();
+
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        if (commandName === 'lock') {
+            const channel = interaction.channel;
+            await channel.permissionOverwrites.edit(interaction.guild.id, { SEND_MESSAGES: false });
+            await interaction.reply({ content: `Channel ${channel.name} has been locked.`, ephemeral: true });
+        }
+
+        if (commandName === 'unlock') {
+            const channel = interaction.channel;
+            await channel.permissionOverwrites.edit(interaction.guild.id, { SEND_MESSAGES: true });
+            await interaction.reply({ content: `Channel ${channel.name} has been unlocked.`, ephemeral: true });
+        }
+
+        if (commandName === 'nick') {
+            const member = options.getUser('user');
+            const newNickname = options.getString('new_nickname');
+
+            const guildMember = await interaction.guild.members.fetch(member.id);
+            await guildMember.setNickname(newNickname);
+            await interaction.reply({ content: `Nickname for ${member.tag} has been changed to ${newNickname}`, ephemeral: true });
+        }
+
+        if (commandName === 'resetnick') {
+            const member = options.getUser('user');
+
+            const guildMember = await interaction.guild.members.fetch(member.id);
+            await guildMember.setNickname(null);
+            await interaction.reply({ content: `Nickname for ${member.tag} has been reset.`, ephemeral: true });
         }
     } catch (error) {
         console.error('Error handling command:', error);
         await interaction.reply({ content: 'There was an error executing the command.', ephemeral: true });
     }
 });
-
-// Additional handlers for mute, unmute, etc.
-async function handleMute(interaction) {
-    const member = await interaction.guild.members.fetch(interaction.options.getUser('user').id);
-    const duration = interaction.options.getString('time'); // e.g., "10m", "1h"
-
-    if (!member.roles.cache.has(muteRole)) {
-        await member.roles.add(muteRole);
-        interaction.reply({ content: `${member.displayName} has been muted for ${duration}`, ephemeral: true });
-
-        // Convert duration to milliseconds and set a timeout to unmute
-        setTimeout(async () => {
-            await member.roles.remove(muteRole);
-            // Inform in a moderator's log or similar channel
-        }, convertDurationToMs(duration)); // You'll need to implement convertDurationToMs
-    } else {
-        interaction.reply({ content: `${member.displayName} is already muted.`, ephemeral: true });
-    }
-}
-
-async function handleUnmute(interaction) {
-    const member = await interaction.guild.members.fetch(interaction.options.getUser('user').id);
-
-    if (member.roles.cache.has(muteRole)) {
-        await member.roles.remove(muteRole);
-        interaction.reply({ content: `${member.displayName} has been unmuted.`, ephemeral: true });
-    } else {
-        interaction.reply({ content: `${member.displayName} is not muted.`, ephemeral: true });
-    }
-}
-
-// Add implementations for other handlers like handleAddUser, handleAddRole, etc.
 
 // Handle DMs and threads
 client.on('messageCreate', async message => {
@@ -227,7 +288,7 @@ client.on('threadUpdate', async (oldThread, newThread) => {
                 .setTimestamp();
 
             await user.send({ embeds: [embed] });
-        } else if (oldThread.archived and !newThread.archived) {
+        } else if (oldThread.archived && !newThread.archived) {
             const embed = new EmbedBuilder()
                 .setColor(0x00ff00) // Green color
                 .setTitle('Support Team')

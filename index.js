@@ -1,4 +1,3 @@
-// Include necessary modules
 const { Client, GatewayIntentBits, Partials, EmbedBuilder, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const express = require('express');
 
@@ -19,7 +18,7 @@ const token = process.env.DISCORD_BOT_TOKEN;
 const channelId = process.env.DISCORD_CHANNEL_ID;
 const muteRole = 'MutedRoleID'; // Replace with your actual Muted role ID
 
-// Set up an Express server to keep bot alive
+// Express server to keep bot alive
 const app = express();
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Bot is running!'));
@@ -45,6 +44,11 @@ function convertDurationToMs(duration) {
         default:
             return 0;
     }
+}
+
+// Enhanced logging to track issues
+function logError(context, error) {
+    console.error(`[ERROR] ${context}:`, error);
 }
 
 // Slash commands definition
@@ -98,7 +102,7 @@ client.once('ready', async () => {
         );
         console.log('Successfully reloaded application (/) commands.');
     } catch (error) {
-        console.error('Error registering commands:', error);
+        logError('Registering Slash Commands', error);
     }
 });
 
@@ -159,39 +163,84 @@ client.on('interactionCreate', async interaction => {
                 await interaction.reply({ content: 'Unknown command!', ephemeral: true });
         }
     } catch (error) {
-        console.error('Error handling command:', error);
-        await interaction.reply({ content: 'There was an error executing the command.', ephemeral: true });
+        logError(`Executing command: ${commandName}`, error);
+        await interaction.reply({ content: `There was an error executing the command: ${error.message}`, ephemeral: true });
     }
 });
 
-// Handle DMs and threads
+// Slash command handler functions
+async function handleAddRole(interaction) {
+    const member = interaction.options.getUser('user');
+    const role = interaction.options.getRole('role');
+
+    if (!member || !role) {
+        throw new Error('Invalid user or role provided.');
+    }
+
+    try {
+        const guildMember = await interaction.guild.members.fetch(member.id);
+        await guildMember.roles.add(role);
+        await interaction.reply({ content: `Role ${role.name} has been added to ${guildMember.user.tag}`, ephemeral: true });
+    } catch (error) {
+        throw new Error(`Failed to add role: ${error.message}`);
+    }
+}
+
+async function handleMute(interaction) {
+    const member = interaction.options.getUser('user');
+    const duration = interaction.options.getString('time') || '1h'; // Default to 1 hour
+
+    if (!member) {
+        throw new Error('Invalid user provided.');
+    }
+
+    try {
+        const guildMember = await interaction.guild.members.fetch(member.id);
+
+        if (guildMember.roles.cache.has(muteRole)) {
+            await interaction.reply({ content: `${guildMember.user.tag} is already muted.`, ephemeral: true });
+            return;
+        }
+
+        await guildMember.roles.add(muteRole);
+        await interaction.reply({ content: `${guildMember.user.tag} has been muted for ${duration}.`, ephemeral: true });
+
+        const msDuration = convertDurationToMs(duration);
+
+        setTimeout(async () => {
+            if (guildMember.roles.cache.has(muteRole)) {
+                await guildMember.roles.remove(muteRole);
+            }
+        }, msDuration);
+    } catch (error) {
+        throw new Error(`Failed to mute user: ${error.message}`);
+    }
+}
+
+// Additional command handler functions (similar structure as above)
+
+// Handle messages (for DM to thread and vice versa)
 client.on('messageCreate', async message => {
-    // Ignore messages from bots
-    if (message.author.bot) return;
+    if (message.author.bot) return; // Ignore messages from bots
 
-    // If message is in a thread in the target channel
     if (message.channel.isThread() && message.channel.parentId === channelId) {
-        // Get the user associated with this thread
+        // If message is in a thread
         const userId = [...userThreads.entries()].find(([, thread]) => thread.id === message.channel.id)?.[0];
-
         if (!userId) return;
 
         try {
             const user = await client.users.fetch(userId);
             await user.send(`**Support Team:** ${message.content}`);
         } catch (error) {
-            console.error('Error sending message to user:', error);
-            message.channel.send(`Couldn't deliver the message to the user.`);
+            logError('Sending message from thread to user', error);
+            await message.channel.send('Could not deliver the message to the user.');
         }
-    }
-    // If message is a DM from a user
-    else if (!message.guild) {
+    } else if (!message.guild) {
+        // If message is a DM from a user
         const targetChannel = await client.channels.fetch(channelId);
         if (!targetChannel.isTextBased()) return;
 
-        const userId = message.author.id;
-        let thread = userThreads.get(userId);
-
+        let thread = userThreads.get(message.author.id);
         if (!thread) {
             const existingThreads = await targetChannel.threads.fetchActive();
             thread = existingThreads.threads.find(t => t.name === `DM with ${message.author.tag}`);
@@ -202,9 +251,7 @@ client.on('messageCreate', async message => {
                     autoArchiveDuration: 60,
                     reason: `Created for DM with ${message.author.tag}`,
                 });
-                userThreads.set(userId, thread);
-            } else {
-                userThreads.set(userId, thread);
+                userThreads.set(message.author.id, thread);
             }
         }
 
@@ -212,15 +259,14 @@ client.on('messageCreate', async message => {
             await thread.send(`**${message.author.tag}:** ${message.content}`);
             await message.react('✅'); // React to confirm receipt
         } catch (error) {
-            console.error('Error sending message to thread:', error);
+            logError('Sending DM to thread', error);
         }
     }
 });
 
-// Thread archive/unarchive handling
+// Handle thread updates (archive/unarchive notifications)
 client.on('threadUpdate', async (oldThread, newThread) => {
     const userId = [...userThreads.entries()].find(([, thread]) => thread.id === newThread.id)?.[0];
-
     if (!userId) return;
 
     try {
@@ -232,7 +278,6 @@ client.on('threadUpdate', async (oldThread, newThread) => {
                 .setTitle('Support Team')
                 .setDescription('The support team has closed this thread.')
                 .setTimestamp();
-
             await user.send({ embeds: [embed] });
         } else if (oldThread.archived && !newThread.archived) {
             const embed = new EmbedBuilder()
@@ -240,15 +285,24 @@ client.on('threadUpdate', async (oldThread, newThread) => {
                 .setTitle('Support Team')
                 .setDescription('The support team has reopened this thread.')
                 .setTimestamp();
-
             await user.send({ embeds: [embed] });
         }
     } catch (error) {
-        console.error('Error notifying user about thread update:', error);
+        logError('Thread update notification', error);
     }
+});
+
+// Catch unhandled promise rejections globally
+process.on('unhandledRejection', (error) => {
+    logError('Unhandled promise rejection', error);
+});
+
+// Catch uncaught exceptions globally
+process.on('uncaughtException', (error) => {
+    logError('Uncaught exception', error);
 });
 
 // Login with token
 client.login(token).catch(error => {
-    console.error('Failed to login:', error);
+    logError('Bot login failed', error);
 });

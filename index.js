@@ -1,4 +1,5 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, REST, Routes, PermissionsBitField, SlashCommandBuilder } = require('discord.js');
+// Include necessary modules
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const express = require('express');
 
 // Initialize Discord client
@@ -8,28 +9,43 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers,
     ],
-    partials: [Partials.Channel],
+    partials: [Partials.Channel, Partials.Message],
 });
 
 // Add token and channel ID from the environment
 const token = process.env.DISCORD_BOT_TOKEN;
 const channelId = process.env.DISCORD_CHANNEL_ID;
+const muteRole = 'MutedRoleID'; // Replace with your actual Muted role ID
 
-// Set up an Express server
+// Set up an Express server to keep bot alive
 const app = express();
 const port = process.env.PORT || 3000;
-
-app.get('/', (req, res) => {
-    res.send('Bot is running!');
-});
-
-app.listen(port, () => {
-    console.log(`HTTP server running on port ${port}`);
-});
+app.get('/', (req, res) => res.send('Bot is running!'));
+app.listen(port, () => console.log(`HTTP server running on port ${port}`));
 
 // User thread management
 const userThreads = new Map();
+
+// Utility function to convert duration strings to milliseconds
+function convertDurationToMs(duration) {
+    const timeValue = parseInt(duration.slice(0, -1));
+    const timeUnit = duration.slice(-1);
+
+    switch (timeUnit) {
+        case 's':
+            return timeValue * 1000;
+        case 'm':
+            return timeValue * 60 * 1000;
+        case 'h':
+            return timeValue * 60 * 60 * 1000;
+        case 'd':
+            return timeValue * 24 * 60 * 60 * 1000;
+        default:
+            return 0;
+    }
+}
 
 // Slash commands definition
 const commands = [
@@ -43,7 +59,7 @@ const commands = [
         .addRoleOption(option => option.setName('role').setDescription('The role to remove').setRequired(true)),
     new SlashCommandBuilder().setName('mute').setDescription('Mute a user')
         .addUserOption(option => option.setName('user').setDescription('The user to mute').setRequired(true))
-        .addStringOption(option => option.setName('time').setDescription('Duration to mute the user').setRequired(false)),
+        .addStringOption(option => option.setName('time').setDescription('Duration to mute the user (e.g., 10m, 1h)').setRequired(false)),
     new SlashCommandBuilder().setName('unmute').setDescription('Unmute a user')
         .addUserOption(option => option.setName('user').setDescription('The user to unmute').setRequired(true)),
     new SlashCommandBuilder().setName('warn').setDescription('Warn a user')
@@ -53,7 +69,7 @@ const commands = [
         .addIntegerOption(option => option.setName('amount').setDescription('Number of messages to clear').setRequired(true)),
     new SlashCommandBuilder().setName('tempban').setDescription('Temporarily ban a user')
         .addUserOption(option => option.setName('user').setDescription('The user to tempban').setRequired(true))
-        .addStringOption(option => option.setName('time').setDescription('Duration of the tempban').setRequired(true)),
+        .addStringOption(option => option.setName('time').setDescription('Duration of the tempban (e.g., 10m, 1h)').setRequired(true)),
     new SlashCommandBuilder().setName('softban').setDescription('Softban a user')
         .addUserOption(option => option.setName('user').setDescription('The user to softban').setRequired(true))
         .addStringOption(option => option.setName('reason').setDescription('Reason for softbanning').setRequired(false)),
@@ -71,7 +87,9 @@ const commands = [
 
 // Register the slash commands with Discord
 const rest = new REST({ version: '10' }).setToken(token);
-(async () => {
+client.once('ready', async () => {
+    console.log(`Logged in as ${client.user.tag}!`);
+
     try {
         console.log('Started refreshing application (/) commands.');
         await rest.put(
@@ -82,11 +100,6 @@ const rest = new REST({ version: '10' }).setToken(token);
     } catch (error) {
         console.error('Error registering commands:', error);
     }
-})();
-
-// Handle bot login
-client.once('ready', () => {
-    console.log(`Logged in as ${client.user.tag}!`);
 });
 
 // Slash command handling
@@ -96,140 +109,54 @@ client.on('interactionCreate', async interaction => {
     const { commandName, options } = interaction;
 
     try {
-        if (commandName === 'add_user') {
-            const user = options.getUser('user');
-            const targetChannel = await client.channels.fetch(channelId);
-
-            let thread = await targetChannel.threads.create({
-                name: `DM with ${user.tag}`,
-                autoArchiveDuration: 60,
-                reason: `DM with ${user.tag}`,
-            });
-
-            userThreads.set(user.id, thread);
-            await interaction.reply({ content: `Thread created with ${user.tag}.`, ephemeral: true });
-        }
-
-        if (commandName === 'add_role') {
-            const member = options.getUser('user');
-            const role = options.getRole('role');
-
-            const guildMember = await interaction.guild.members.fetch(member.id);
-            await guildMember.roles.add(role);
-            await interaction.reply({ content: `${role.name} added to ${member.tag}`, ephemeral: true });
-        }
-
-        if (commandName === 'remove_role') {
-            const member = options.getUser('user');
-            const role = options.getRole('role');
-
-            const guildMember = await interaction.guild.members.fetch(member.id);
-            await guildMember.roles.remove(role);
-            await interaction.reply({ content: `${role.name} removed from ${member.tag}`, ephemeral: true });
-        }
-
-        if (commandName === 'mute') {
-            const member = options.getUser('user');
-            const time = options.getString('time') || '1h'; // Default mute time if not specified
-
-            // Mute implementation here
-            await interaction.reply({ content: `${member.tag} has been muted for ${time}`, ephemeral: true });
-        }
-
-        if (commandName === 'unmute') {
-            const member = options.getUser('user');
-
-            // Unmute implementation here
-            await interaction.reply({ content: `${member.tag} has been unmuted`, ephemeral: true });
-        }
-
-        if (commandName === 'warn') {
-            const member = options.getUser('user');
-            const reason = options.getString('reason') || 'No reason provided';
-
-            // Warn implementation here
-            await interaction.reply({ content: `${member.tag} has been warned. Reason: ${reason}`, ephemeral: true });
-        }
-
-        if (commandName === 'clear') {
-            const amount = options.getInteger('amount');
-
-            // Clear messages implementation here
-            await interaction.reply({ content: `Cleared ${amount} messages.`, ephemeral: true });
-        }
-
-        if (commandName === 'tempban') {
-            const member = options.getUser('user');
-            const time = options.getString('time');
-
-            // Tempban implementation here
-            await interaction.reply({ content: `${member.tag} has been temporarily banned for ${time}`, ephemeral: true });
-        }
-
-        if (commandName === 'softban') {
-            const member = options.getUser('user');
-            const reason = options.getString('reason') || 'No reason provided';
-
-            // Softban implementation here
-            await interaction.reply({ content: `${member.tag} has been softbanned. Reason: ${reason}`, ephemeral: true });
-        }
-
-        if (commandName === 'serverinfo') {
-            const guild = interaction.guild;
-            const embed = new EmbedBuilder()
-                .setColor(0x0099ff)
-                .setTitle('Server Information')
-                .addFields(
-                    { name: 'Server Name', value: guild.name, inline: true },
-                    { name: 'Total Members', value: `${guild.memberCount}`, inline: true },
-                )
-                .setTimestamp();
-
-            await interaction.reply({ embeds: [embed], ephemeral: true });
-        }
-
-        if (commandName === 'userinfo') {
-            const user = options.getUser('user');
-            const member = await interaction.guild.members.fetch(user.id);
-            const embed = new EmbedBuilder()
-                .setColor(0x0099ff)
-                .setTitle('User Information')
-                .addFields(
-                    { name: 'Username', value: user.tag, inline: true },
-                    { name: 'Joined Server', value: member.joinedAt.toDateString(), inline: true },
-                )
-                .setTimestamp();
-
-            await interaction.reply({ embeds: [embed], ephemeral: true });
-        }
-
-        if (commandName === 'lock') {
-            const channel = interaction.channel;
-            await channel.permissionOverwrites.edit(interaction.guild.id, { SEND_MESSAGES: false });
-            await interaction.reply({ content: `Channel ${channel.name} has been locked.`, ephemeral: true });
-        }
-
-        if (commandName === 'unlock') {
-            const channel = interaction.channel;
-            await channel.permissionOverwrites.edit(interaction.guild.id, { SEND_MESSAGES: true });
-            await interaction.reply({ content: `Channel ${channel.name} has been unlocked.`, ephemeral: true });
-        }
-
-        if (commandName === 'nick') {
-            const member = options.getUser('user');
-            const newNickname = options.getString('new_nickname');
-
-            const guildMember = await interaction.guild.members.fetch(member.id);
-            await guildMember.setNickname(newNickname);
-            await interaction.reply({ content: `Nickname for ${member.tag} has been changed to ${newNickname}`, ephemeral: true });
-        }
-
-        if (commandName === 'resetnick') {
-            const member = options.getUser('user');
-
-            const guildMember = await interaction.guild.members.fetch(member.id);
-            await guildMember.setNickname(null);
-            await interaction.reply({ content: `Nickname for ${member.tag} has been reset.`, ephemeral: true });
+        switch (commandName) {
+            case 'add_user':
+                await handleAddUser(interaction);
+                break;
+            case 'add_role':
+                await handleAddRole(interaction);
+                break;
+            case 'remove_role':
+                await handleRemoveRole(interaction);
+                break;
+            case 'mute':
+                await handleMute(interaction);
+                break;
+            case 'unmute':
+                await handleUnmute(interaction);
+                break;
+            case 'warn':
+                await handleWarn(interaction);
+                break;
+            case 'clear':
+                await handleClear(interaction);
+                break;
+            case 'tempban':
+                await handleTempban(interaction);
+                break;
+            case 'softban':
+                await handleSoftban(interaction);
+                break;
+            case 'serverinfo':
+                await handleServerInfo(interaction);
+                break;
+            case 'userinfo':
+                await handleUserInfo(interaction);
+                break;
+            case 'lock':
+                await handleLock(interaction);
+                break;
+            case 'unlock':
+                await handleUnlock(interaction);
+                break;
+            case 'nick':
+                await handleNick(interaction);
+                break;
+            case 'resetnick':
+                await handleResetNick(interaction);
+                break;
+            default:
+                await interaction.reply({ content: 'Unknown command!', ephemeral: true });
         }
     } catch (error) {
         console.error('Error handling command:', error);
@@ -239,39 +166,58 @@ client.on('interactionCreate', async interaction => {
 
 // Handle DMs and threads
 client.on('messageCreate', async message => {
-    if (message.guild || message.author.bot) return; // Ignore messages from servers and bots
+    // Ignore messages from bots
+    if (message.author.bot) return;
 
-    const targetChannel = await client.channels.fetch(channelId);
-    if (!targetChannel.isTextBased()) return;
+    // If message is in a thread in the target channel
+    if (message.channel.isThread() && message.channel.parentId === channelId) {
+        // Get the user associated with this thread
+        const userId = [...userThreads.entries()].find(([, thread]) => thread.id === message.channel.id)?.[0];
 
-    const userId = message.author.id;
-    let thread = userThreads.get(userId);
+        if (!userId) return;
 
-    if (!thread) {
-        const existingThreads = await targetChannel.threads.fetchActive();
-        thread = existingThreads.threads.find(t => t.name === `DM with ${message.author.tag}`);
-
-        if (!thread) {
-            thread = await targetChannel.threads.create({
-                name: `DM with ${message.author.tag}`,
-                autoArchiveDuration: 60,
-                reason: `Created for DM with ${message.author.tag}`,
-            });
-            userThreads.set(userId, thread);
-        } else {
-            userThreads.set(userId, thread);
+        try {
+            const user = await client.users.fetch(userId);
+            await user.send(`**Support Team:** ${message.content}`);
+        } catch (error) {
+            console.error('Error sending message to user:', error);
+            message.channel.send(`Couldn't deliver the message to the user.`);
         }
     }
+    // If message is a DM from a user
+    else if (!message.guild) {
+        const targetChannel = await client.channels.fetch(channelId);
+        if (!targetChannel.isTextBased()) return;
 
-    try {
-        await thread.send(message.content);
-        await message.react('✅'); // React with a checkmark to confirm receipt
-    } catch (error) {
-        console.error('Error sending message to thread:', error);
+        const userId = message.author.id;
+        let thread = userThreads.get(userId);
+
+        if (!thread) {
+            const existingThreads = await targetChannel.threads.fetchActive();
+            thread = existingThreads.threads.find(t => t.name === `DM with ${message.author.tag}`);
+
+            if (!thread) {
+                thread = await targetChannel.threads.create({
+                    name: `DM with ${message.author.tag}`,
+                    autoArchiveDuration: 60,
+                    reason: `Created for DM with ${message.author.tag}`,
+                });
+                userThreads.set(userId, thread);
+            } else {
+                userThreads.set(userId, thread);
+            }
+        }
+
+        try {
+            await thread.send(`**${message.author.tag}:** ${message.content}`);
+            await message.react('✅'); // React to confirm receipt
+        } catch (error) {
+            console.error('Error sending message to thread:', error);
+        }
     }
 });
 
-// Listen for thread updates to notify users when a thread is archived or unarchived
+// Thread archive/unarchive handling
 client.on('threadUpdate', async (oldThread, newThread) => {
     const userId = [...userThreads.entries()].find(([, thread]) => thread.id === newThread.id)?.[0];
 

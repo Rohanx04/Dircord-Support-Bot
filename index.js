@@ -16,7 +16,7 @@ const client = new Client({
 // Add token and channel ID from the environment
 const token = process.env.DISCORD_BOT_TOKEN;
 const channelId = process.env.DISCORD_CHANNEL_ID;
-const muteRole = 'MutedRoleID'; // Replace with your actual Muted role ID
+const muteRole = 'MutedRoleID'; // Replace this with your actual Muted role ID from Discord
 
 // Express server to keep bot alive
 const app = express();
@@ -168,7 +168,22 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Slash command handler functions
+// Command handler functions
+
+async function handleAddUser(interaction) {
+    const user = interaction.options.getUser('user');
+    const targetChannel = await client.channels.fetch(channelId);
+
+    let thread = await targetChannel.threads.create({
+        name: `DM with ${user.tag}`,
+        autoArchiveDuration: 60,
+        reason: `DM with ${user.tag}`,
+    });
+
+    userThreads.set(user.id, thread);
+    await interaction.reply({ content: `Thread created with ${user.tag}.`, ephemeral: true });
+}
+
 async function handleAddRole(interaction) {
     const member = interaction.options.getUser('user');
     const role = interaction.options.getRole('role');
@@ -183,6 +198,19 @@ async function handleAddRole(interaction) {
         await interaction.reply({ content: `Role ${role.name} has been added to ${guildMember.user.tag}`, ephemeral: true });
     } catch (error) {
         throw new Error(`Failed to add role: ${error.message}`);
+    }
+}
+
+async function handleRemoveRole(interaction) {
+    const member = interaction.options.getUser('user');
+    const role = interaction.options.getRole('role');
+
+    try {
+        const guildMember = await interaction.guild.members.fetch(member.id);
+        await guildMember.roles.remove(role);
+        await interaction.reply({ content: `${role.name} removed from ${guildMember.user.tag}.`, ephemeral: true });
+    } catch (error) {
+        throw new Error(`Failed to remove role: ${error.message}`);
     }
 }
 
@@ -217,80 +245,91 @@ async function handleMute(interaction) {
     }
 }
 
-// Additional command handler functions (similar structure as above)
+async function handleUnmute(interaction) {
+    const member = await interaction.guild.members.fetch(interaction.options.getUser('user').id);
 
-// Handle messages (for DM to thread and vice versa)
-client.on('messageCreate', async message => {
-    if (message.author.bot) return; // Ignore messages from bots
-
-    if (message.channel.isThread() && message.channel.parentId === channelId) {
-        // If message is in a thread
-        const userId = [...userThreads.entries()].find(([, thread]) => thread.id === message.channel.id)?.[0];
-        if (!userId) return;
-
-        try {
-            const user = await client.users.fetch(userId);
-            await user.send(`**Support Team:** ${message.content}`);
-        } catch (error) {
-            logError('Sending message from thread to user', error);
-            await message.channel.send('Could not deliver the message to the user.');
-        }
-    } else if (!message.guild) {
-        // If message is a DM from a user
-        const targetChannel = await client.channels.fetch(channelId);
-        if (!targetChannel.isTextBased()) return;
-
-        let thread = userThreads.get(message.author.id);
-        if (!thread) {
-            const existingThreads = await targetChannel.threads.fetchActive();
-            thread = existingThreads.threads.find(t => t.name === `DM with ${message.author.tag}`);
-
-            if (!thread) {
-                thread = await targetChannel.threads.create({
-                    name: `DM with ${message.author.tag}`,
-                    autoArchiveDuration: 60,
-                    reason: `Created for DM with ${message.author.tag}`,
-                });
-                userThreads.set(message.author.id, thread);
-            }
-        }
-
-        try {
-            await thread.send(`**${message.author.tag}:** ${message.content}`);
-            await message.react('✅'); // React to confirm receipt
-        } catch (error) {
-            logError('Sending DM to thread', error);
-        }
+    if (member.roles.cache.has(muteRole)) {
+        await member.roles.remove(muteRole);
+        await interaction.reply({ content: `${member.user.tag} has been unmuted.`, ephemeral: true });
+    } else {
+        await interaction.reply({ content: `${member.user.tag} is not muted.`, ephemeral: true });
     }
-});
+}
 
-// Handle thread updates (archive/unarchive notifications)
-client.on('threadUpdate', async (oldThread, newThread) => {
-    const userId = [...userThreads.entries()].find(([, thread]) => thread.id === newThread.id)?.[0];
-    if (!userId) return;
+async function handleWarn(interaction) {
+    const member = interaction.options.getUser('user');
+    const reason = interaction.options.getString('reason') || 'No reason provided';
 
-    try {
-        const user = await client.users.fetch(userId);
+    // Log warning to a moderator channel or database
+    await interaction.reply({ content: `${member.tag} has been warned. Reason: ${reason}`, ephemeral: true });
+}
 
-        if (!oldThread.archived && newThread.archived) {
-            const embed = new EmbedBuilder()
-                .setColor(0xff0000) // Red color
-                .setTitle('Support Team')
-                .setDescription('The support team has closed this thread.')
-                .setTimestamp();
-            await user.send({ embeds: [embed] });
-        } else if (oldThread.archived && !newThread.archived) {
-            const embed = new EmbedBuilder()
-                .setColor(0x00ff00) // Green color
-                .setTitle('Support Team')
-                .setDescription('The support team has reopened this thread.')
-                .setTimestamp();
-            await user.send({ embeds: [embed] });
-        }
-    } catch (error) {
-        logError('Thread update notification', error);
+async function handleClear(interaction) {
+    const amount = interaction.options.getInteger('amount');
+
+    if (!interaction.channel || !interaction.channel.isTextBased()) {
+        return interaction.reply({ content: 'This command can only be used in text channels.', ephemeral: true });
     }
-});
+
+    await interaction.channel.bulkDelete(amount, true);
+    await interaction.reply({ content: `Cleared ${amount} messages.`, ephemeral: true });
+}
+
+async function handleServerInfo(interaction) {
+    const guild = interaction.guild;
+    const embed = new EmbedBuilder()
+        .setColor(0x0099ff)
+        .setTitle('Server Information')
+        .addFields(
+            { name: 'Server Name', value: guild.name, inline: true },
+            { name: 'Total Members', value: `${guild.memberCount}`, inline: true },
+        )
+        .setTimestamp();
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+async function handleUserInfo(interaction) {
+    const user = interaction.options.getUser('user');
+    const member = await interaction.guild.members.fetch(user.id);
+    const embed = new EmbedBuilder()
+        .setColor(0x0099ff)
+        .setTitle('User Information')
+        .addFields(
+            { name: 'Username', value: user.tag, inline: true },
+            { name: 'Joined Server', value: member.joinedAt.toDateString(), inline: true },
+        )
+        .setTimestamp();
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+async function handleLock(interaction) {
+    const channel = interaction.channel;
+    await channel.permissionOverwrites.edit(interaction.guild.id, { SendMessages: false });
+    await interaction.reply({ content: `Channel ${channel.name} has been locked.`, ephemeral: true });
+}
+
+async function handleUnlock(interaction) {
+    const channel = interaction.channel;
+    await channel.permissionOverwrites.edit(interaction.guild.id, { SendMessages: true });
+    await interaction.reply({ content: `Channel ${channel.name} has been unlocked.`, ephemeral: true });
+}
+
+async function handleNick(interaction) {
+    const member = await interaction.guild.members.fetch(interaction.options.getUser('user').id);
+    const newNickname = interaction.options.getString('new_nickname');
+
+    await member.setNickname(newNickname);
+    await interaction.reply({ content: `Nickname for ${member.user.tag} has been changed to ${newNickname}`, ephemeral: true });
+}
+
+async function handleResetNick(interaction) {
+    const member = await interaction.guild.members.fetch(interaction.options.getUser('user').id);
+
+    await member.setNickname(null);
+    await interaction.reply({ content: `Nickname for ${member.user.tag} has been reset.`, ephemeral: true });
+}
 
 // Catch unhandled promise rejections globally
 process.on('unhandledRejection', (error) => {

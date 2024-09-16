@@ -260,7 +260,6 @@ async function handleWarn(interaction) {
     const member = interaction.options.getUser('user');
     const reason = interaction.options.getString('reason') || 'No reason provided';
 
-    // Log warning to a moderator channel or database
     await interaction.reply({ content: `${member.tag} has been warned. Reason: ${reason}`, ephemeral: true });
 }
 

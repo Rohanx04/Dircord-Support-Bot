@@ -101,8 +101,45 @@ client.once('ready', async () => {
             { body: commands.map(command => command.toJSON()) },
         );
         console.log('Successfully reloaded application (/) commands.');
+
+        // Fetch invites for all guilds and store them
+        const guild = client.guilds.cache.get(channelId); // Use your actual Guild/Server ID
+        const fetchedInvites = await guild.invites.fetch();
+        invites.set(guild.id, fetchedInvites);
+        console.log('Stored guild invites!');
     } catch (error) {
         logError('Registering Slash Commands', error);
+    }
+});
+
+// Handle invites
+const invites = new Map(); // Store invites in memory
+
+// When a user joins, check which invite was used
+client.on('guildMemberAdd', async member => {
+    const guild = member.guild;
+
+    try {
+        // Fetch new invite list
+        const newInvites = await guild.invites.fetch();
+        const oldInvites = invites.get(guild.id);
+
+        // Find the invite that was used
+        const invite = newInvites.find(i => i.uses > oldInvites.get(i.code).uses);
+
+        // Log information about who used which invite
+        if (invite) {
+            const inviter = invite.inviter.tag;
+            const logChannel = guild.channels.cache.find(channel => channel.name === 'invite-logs');
+            if (logChannel) {
+                logChannel.send(`${member.user.tag} joined using invite code ${invite.code} from ${inviter}. Invite has been used ${invite.uses} times.`);
+            }
+        }
+
+        // Update the invites cache
+        invites.set(guild.id, newInvites);
+    } catch (error) {
+        logError('Error tracking invite', error);
     }
 });
 

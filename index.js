@@ -331,6 +331,80 @@ async function handleResetNick(interaction) {
     await interaction.reply({ content: `Nickname for ${member.user.tag} has been reset.`, ephemeral: true });
 }
 
+// Handle messages (for DM to thread and vice versa)
+client.on('messageCreate', async message => {
+    if (message.author.bot) return; // Ignore messages from bots
+
+    if (message.channel.isThread() && message.channel.parentId === channelId) {
+        // If message is in a thread
+        const userId = [...userThreads.entries()].find(([, thread]) => thread.id === message.channel.id)?.[0];
+        if (!userId) return;
+
+        try {
+            const user = await client.users.fetch(userId);
+            await user.send(`**Support Team:** ${message.content}`);
+            await message.react('✅'); // React with green tick to confirm the message was forwarded
+        } catch (error) {
+            logError('Sending message from thread to user', error);
+            await message.channel.send('Could not deliver the message to the user.');
+        }
+    } else if (!message.guild) {
+        // If message is a DM from a user
+        const targetChannel = await client.channels.fetch(channelId);
+        if (!targetChannel.isTextBased()) return;
+
+        let thread = userThreads.get(message.author.id);
+        if (!thread) {
+            const existingThreads = await targetChannel.threads.fetchActive();
+            thread = existingThreads.threads.find(t => t.name === `DM with ${message.author.tag}`);
+
+            if (!thread) {
+                thread = await targetChannel.threads.create({
+                    name: `DM with ${message.author.tag}`,
+                    autoArchiveDuration: 60,
+                    reason: `Created for DM with ${message.author.tag}`,
+                });
+                userThreads.set(message.author.id, thread);
+            }
+        }
+
+        try {
+            await thread.send(`**${message.author.tag}:** ${message.content}`);
+            await message.react('✅'); // React with green tick to confirm receipt of the message
+        } catch (error) {
+            logError('Sending DM to thread', error);
+        }
+    }
+});
+
+// Handle thread updates (archive/unarchive notifications)
+client.on('threadUpdate', async (oldThread, newThread) => {
+    const userId = [...userThreads.entries()].find(([, thread]) => thread.id === newThread.id)?.[0];
+    if (!userId) return;
+
+    try {
+        const user = await client.users.fetch(userId);
+
+        if (!oldThread.archived && newThread.archived) {
+            const embed = new EmbedBuilder()
+                .setColor(0xff0000) // Red color
+                .setTitle('Support Team')
+                .setDescription('The support team has closed this thread.')
+                .setTimestamp();
+            await user.send({ embeds: [embed] });
+        } else if (oldThread.archived && !newThread.archived) {
+            const embed = new EmbedBuilder()
+                .setColor(0x00ff00) // Green color
+                .setTitle('Support Team')
+                .setDescription('The support team has reopened this thread.')
+                .setTimestamp();
+            await user.send({ embeds: [embed] });
+        }
+    } catch (error) {
+        logError('Thread update notification', error);
+    }
+});
+
 // Catch unhandled promise rejections globally
 process.on('unhandledRejection', (error) => {
     logError('Unhandled promise rejection', error);

@@ -16,7 +16,7 @@ const client = new Client({
 // Add token and channel ID from the environment
 const token = process.env.DISCORD_BOT_TOKEN;
 const channelId = process.env.DISCORD_CHANNEL_ID;
-const muteRole = 'MutedRoleID'; // Replace this with your actual Muted role ID from Discord
+const muteRole = '741167240648589343'; // Replace this with your actual Muted role ID from Discord
 
 // Express server to keep bot alive
 const app = express();
@@ -331,25 +331,35 @@ async function handleResetNick(interaction) {
     await interaction.reply({ content: `Nickname for ${member.user.tag} has been reset.`, ephemeral: true });
 }
 
-// Handle messages (for DM to thread and vice versa)
+// Handle messages (for DM to thread and thread to DM)
 client.on('messageCreate', async message => {
     if (message.author.bot) return; // Ignore messages from bots
 
+    // If the message is from the support team inside a thread
     if (message.channel.isThread() && message.channel.parentId === channelId) {
-        // If message is in a thread
         const userId = [...userThreads.entries()].find(([, thread]) => thread.id === message.channel.id)?.[0];
-        if (!userId) return;
+        if (!userId) {
+            logError('Thread to user', 'Could not find the user associated with this thread.');
+            return;
+        }
 
         try {
             const user = await client.users.fetch(userId);
-            await user.send(`**Support Team:** ${message.content}`);
-            await message.react('✅'); // React with green tick to confirm the message was forwarded
+
+            // Send message to the user via DM
+            if (user) {
+                await user.send(`**Support Team:** ${message.content}`);
+                await message.react('✅'); // React with green tick to confirm the message was forwarded
+            } else {
+                logError('Thread to user', `Unable to fetch user with ID: ${userId}`);
+            }
         } catch (error) {
             logError('Sending message from thread to user', error);
             await message.channel.send('Could not deliver the message to the user.');
         }
+
+    // If the message is from the user via DM to the bot
     } else if (!message.guild) {
-        // If message is a DM from a user
         const targetChannel = await client.channels.fetch(channelId);
         if (!targetChannel.isTextBased()) return;
 

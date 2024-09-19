@@ -15,7 +15,7 @@ const client = new Client({
 
 // Add token and channel ID from the environment
 const token = process.env.DISCORD_BOT_TOKEN;
-const channelId = process.env.DISCORD_CHANNEL_ID;
+let inviteLogChannelId = process.env.INVITE_LOG_CHANNEL_ID; // The invite log channel ID
 const muteRole = '741167240648589343'; // Replace this with your actual Muted role ID from Discord
 
 // Express server to keep bot alive
@@ -87,6 +87,8 @@ const commands = [
         .addStringOption(option => option.setName('new_nickname').setDescription('New nickname').setRequired(true)),
     new SlashCommandBuilder().setName('resetnick').setDescription('Reset a user\'s nickname')
         .addUserOption(option => option.setName('user').setDescription('The user to reset nickname').setRequired(true)),
+    new SlashCommandBuilder().setName('set_invite_log_channel').setDescription('Set the channel for invite logs')
+        .addChannelOption(option => option.setName('channel').setDescription('The channel to send invite logs').setRequired(true)),
 ];
 
 // Register the slash commands with Discord
@@ -130,7 +132,7 @@ client.on('guildMemberAdd', async member => {
         // Log information about who used which invite
         if (invite) {
             const inviter = invite.inviter.tag;
-            const logChannel = guild.channels.cache.find(channel => channel.name === 'invite-logs');
+            const logChannel = client.channels.cache.get(inviteLogChannelId);
             if (logChannel) {
                 logChannel.send(`${member.user.tag} joined using invite code ${invite.code} from ${inviter}. Invite has been used ${invite.uses} times.`);
             }
@@ -151,6 +153,9 @@ client.on('interactionCreate', async interaction => {
 
     try {
         switch (commandName) {
+            case 'set_invite_log_channel':
+                await handleSetInviteLogChannel(interaction);
+                break;
             case 'add_user':
                 await handleAddUser(interaction);
                 break;
@@ -206,6 +211,12 @@ client.on('interactionCreate', async interaction => {
 });
 
 // Command handler functions
+
+async function handleSetInviteLogChannel(interaction) {
+    const channel = interaction.options.getChannel('channel');
+    inviteLogChannelId = channel.id;
+    await interaction.reply({ content: `Invite log channel set to ${channel.name}.`, ephemeral: true });
+}
 
 async function handleAddUser(interaction) {
     const user = interaction.options.getUser('user');

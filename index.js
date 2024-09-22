@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, REST, Routes, SlashCommandBuilder, ActivityType } = require('discord.js');
 const express = require('express');
 
 // Initialize Discord client
@@ -95,6 +95,9 @@ const commands = [
 const rest = new REST({ version: '10' }).setToken(token);
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
+
+    // Set rich presence activity to "Listening to DMs"
+    client.user.setActivity('DMs', { type: ActivityType.Listening });
 
     try {
         console.log('Started refreshing application (/) commands.');
